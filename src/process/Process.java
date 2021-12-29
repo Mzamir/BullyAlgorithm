@@ -1,10 +1,13 @@
+package process;
+
+import message.Message;
+import message.MessageMapper;
+
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 
-import static utils.Constants.HOST;
-import static utils.Constants.MESSAGE_TIME_OUT;
-import static utils.Constants.ALIVE_MESSAGE;
+import static utils.Constants.*;
 
 public class Process {
     private int id;
@@ -13,11 +16,17 @@ public class Process {
     private ServerSocket serverSocket = null;
     private final ProcessMangerInterface mangerInterface;
 
+
     public Process(int id, boolean isAlive, boolean isCoordinator, ProcessMangerInterface mangerInterface) {
         this.id = id;
         this.isAlive = isAlive;
         this.isCoordinator = isCoordinator;
         this.mangerInterface = mangerInterface;
+        try {
+            this.serverSocket = new ServerSocket(id);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public Process(int id, ProcessMangerInterface mangerInterface) {
@@ -25,84 +34,84 @@ public class Process {
         this.mangerInterface = mangerInterface;
     }
 
-    public String sendMessage(Process process, String message) {
+    // act as a client to send message
+    public void sendMessage(Process process, Message message) {
         try {
-            Socket socket = new Socket(HOST, process.getId()); // Register this on coming process port
-            System.out.println("Client connected");
+            Socket socket = new Socket(HOST, process.getId());
+            socket.setSoTimeout(MESSAGE_TIME_OUT);
+            System.out.println("Sending " + message + " from " + this.getId() + " to " + process.getId());
             DataInputStream inputStream = new DataInputStream(socket.getInputStream());
             DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
-            BufferedReader serverReader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            // Send message to the process
+            outputStream.writeUTF(MessageMapper.parseToString(message));
+            // Get response
+            String response = inputStream.readUTF();
+            handleReceivedMessage(response);
 
-            outputStream.writeUTF(message);
             outputStream.flush();
-
-            String responseFromServer = serverReader.readLine();
-            System.out.println(responseFromServer);
-
             outputStream.close();
-            serverReader.close();
-            inputStream.close();
             socket.close();
-            System.out.println("Connection closed");
-            return responseFromServer;
         } catch (Exception e) {
-            System.out.println(e + " " + process.getId());
+            System.out.println("Exception " + e.getMessage() + " on " + process.getId());
         }
+    }
 
+    // Act as server to receive message
+    public Message receiveMessage() {
+        try {
+            serverSocket.setSoTimeout(MESSAGE_TIME_OUT);
+            Socket socket = serverSocket.accept();
+            DataInputStream inputStream = new DataInputStream(socket.getInputStream());
+            DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
+            String messageFromClient = inputStream.readUTF();
+            System.out.println(this.getId() + " Received " + messageFromClient);
+            Message message = handleReceivedMessage(messageFromClient);
+            System.out.println(this.getId() + " Response is " + message);
+            outputStream.writeUTF(MessageMapper.parseToString(message));
+            outputStream.flush();
+            outputStream.close();
+            inputStream.close();
+
+            return MessageMapper.parseToObject(messageFromClient);
+        } catch (IOException e) {
+            if (!this.isCoordinator) {
+                System.out.println(this.getId() + " no responding will be deactivated");
+                this.isAlive = false;
+            }
+        }
         return null;
     }
 
-    // Act as socket server
-    public String receiveMessage() throws IOException {
-        Socket socket = null;
-        DataInputStream inputStream = null;
-        PrintStream printStream = null;
-        try {
-            serverSocket.setSoTimeout(MESSAGE_TIME_OUT);
-            socket = serverSocket.accept();
-            inputStream = new DataInputStream(socket.getInputStream());
-            // output data to the client
-            printStream = new PrintStream(socket.getOutputStream());
-            // read from client
-            String messageFromClient = inputStream.readUTF();
-            System.out.println(messageFromClient);
-
-            // send to client
-            printStream.println("OK");
-
-        } catch (IOException e) {
-            System.out.println("Receive Message " + this.getId());
+    private Message handleReceivedMessage(String messageFromClient) {
+        Message message = MessageMapper.parseToObject(messageFromClient);
+        if (message.getMessageTyp().equals(REGISTER_MESSAGE)) {
+            mangerInterface.addNewProcess();
+        } else if (message.getMessageTyp().equals(ELECTION_MESSAGE)) {
+            mangerInterface.requestElection();
         }
-        printStream.close();
-        socket.close();
-        serverSocket.close();
-        inputStream.close();
-        System.out.println("Connection closed");
-        return null;
+        return new Message(this.getId(), message.getMessageTyp(), messageFromClient);
     }
 
     public void startListen() {
-        System.out.println("Listening on " + this.getId());
         while (isAlive) {
             initiateServerSocket();
-            try {
-                receiveMessage();
-            }catch (IOException e){
-                e.printStackTrace();
-            }
-            if (isCoordinator) {
+            receiveMessage();
+
+            if (isCoordinator)
                 mangerInterface.sendMessageToAll(this, ALIVE_MESSAGE);
-            }
         }
+        // if not alive and not coordinator
+        // send election request
         if (!isCoordinator)
             mangerInterface.requestElection(this);
 
     }
 
-    private void initiateServerSocket() {
+    public void initiateServerSocket() {
         try {
             if (this.serverSocket == null || this.serverSocket.isClosed()) {
                 serverSocket = new ServerSocket(this.getId());
+                System.out.println("Listening on " + this.getId());
             }
         } catch (IOException e) {
             System.out.println("Couldn't establish connection on " + getId());
@@ -143,7 +152,7 @@ public class Process {
 
     @Override
     public String toString() {
-        return "Process{" +
+        return "process.Process{" +
                 "id=" + id +
                 ", isAlive=" + isAlive +
                 ", isCoorinputator=" + isCoordinator +
