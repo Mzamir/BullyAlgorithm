@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 
-import static utils.Config.HOST;
+import static utils.Constants.HOST;
 
 public class MessagingManager {
 

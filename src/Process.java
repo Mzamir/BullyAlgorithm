@@ -1,11 +1,9 @@
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 
-import static utils.Config.HOST;
-import static utils.Config.MESSAGE_TIME_OUT;
+import static utils.Constants.HOST;
+import static utils.Constants.MESSAGE_TIME_OUT;
 import static utils.Constants.ALIVE_MESSAGE;
 
 public class Process {
@@ -15,142 +13,99 @@ public class Process {
     private ServerSocket serverSocket = null;
     private final ProcessMangerInterface mangerInterface;
 
+    public Process(int id, boolean isAlive, boolean isCoordinator, ProcessMangerInterface mangerInterface) {
+        this.id = id;
+        this.isAlive = isAlive;
+        this.isCoordinator = isCoordinator;
+        this.mangerInterface = mangerInterface;
+    }
+
     public Process(int id, ProcessMangerInterface mangerInterface) {
         this.id = id;
         this.mangerInterface = mangerInterface;
     }
 
-   /* public Process(int port) {
-        this.id = port;
-    }
-
-    public String sendMessage(Process process, String message) {
-        String response = "";
-        DataInputStream input;
-        DataOutputStream out;
-        try (Socket socket = new Socket(HOST, process.getId())) {
-            socket.setSoTimeout(MESSAGE_TIME_OUT);
-            System.out.println("Seninputg message " + message + " From " + this.getId() + " to " + process.getId());
-            input = new DataInputStream(socket.getInputStream());
-            out = new DataOutputStream(socket.getOutputStream());
-            out.writeUTF(message);
-            response = input.readUTF();
-            System.out.println(" Process " + process.getId() + " is " + response);
-            out.flush();
-            socket.close();
-            out.close();
-        } catch (Exception e) {
-            System.out.println("IOException" + e.getMessage());
-        }
-
-        return response;
-    }
-
-    public void handleReceivedMessages() {
-        String response = "";
-        DataInputStream input;
-        DataOutputStream out;
-        try {
-            initiateServerSocket();
-            Socket socket = serverSocket.accept();
-            input = new DataInputStream(socket.getInputStream());
-            out = new DataOutputStream(socket.getOutputStream());
-            response = input.readUTF();
-            System.out.println(" Process " + response);
-            out.flush();
-            socket.close();
-            out.close();
-            input.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-    }
-
-    public void startListen() {
-        while (isAlive()) {
-            initiateServerSocket();
-            handleReceivedMessages();
-            if (isCoorinputator())
-                mangerInterface.sendMessageToAll(ALIVE_MESSAGE);
-        }
-        System.out.println(this.getId() + " no coorinputator");
-        if (!isCoorinputator())
-            mangerInterface.requestElection(this);
-
-    }
-*/
-
     public String sendMessage(Process process, String message) {
         try {
-            Socket socket = new Socket(HOST, process.getId());
-            System.out.println("sending to " + message + " to " + process.getId());
-            socket.setSoTimeout(MESSAGE_TIME_OUT);
-            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-            DataInputStream input = new DataInputStream(socket.getInputStream());
-            out.writeUTF(message);
-            String response = input.readUTF();
-//            process.decodeResponse(response);
-            out.flush();
-            out.close();
+            Socket socket = new Socket(HOST, process.getId()); // Register this on coming process port
+            System.out.println("Client connected");
+            DataInputStream inputStream = new DataInputStream(socket.getInputStream());
+            DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
+            BufferedReader serverReader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+            outputStream.writeUTF(message);
+            outputStream.flush();
+
+            String responseFromServer = serverReader.readLine();
+            System.out.println(responseFromServer);
+
+            outputStream.close();
+            serverReader.close();
+            inputStream.close();
             socket.close();
-            return response;
+            System.out.println("Connection closed");
+            return responseFromServer;
         } catch (Exception e) {
             System.out.println(e + " " + process.getId());
         }
+
         return null;
     }
 
-    public String receiveAndGiveResponse() {
+    // Act as socket server
+    public String receiveMessage() throws IOException {
+        Socket socket = null;
+        DataInputStream inputStream = null;
+        PrintStream printStream = null;
         try {
-            initiateServerSocket();
             serverSocket.setSoTimeout(MESSAGE_TIME_OUT);
-            Socket socket = serverSocket.accept();
-            DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-            DataInputStream input = new DataInputStream(socket.getInputStream());
-            String response = input.readUTF();
-            System.out.println("received message :  " + response);
-            System.out.println("responded with " + response);
-            out.writeUTF(response);
-            out.flush();
-            out.close();
-            input.close();
-            return response;
-        } catch (Exception e) {
-            if (!this.isCoordinator())
-                mangerInterface.requestElection(this);
+            socket = serverSocket.accept();
+            inputStream = new DataInputStream(socket.getInputStream());
+            // output data to the client
+            printStream = new PrintStream(socket.getOutputStream());
+            // read from client
+            String messageFromClient = inputStream.readUTF();
+            System.out.println(messageFromClient);
+
+            // send to client
+            printStream.println("OK");
+
+        } catch (IOException e) {
+            System.out.println("Receive Message " + this.getId());
         }
+        printStream.close();
+        socket.close();
+        serverSocket.close();
+        inputStream.close();
+        System.out.println("Connection closed");
         return null;
     }
 
-    void startListen() {
-        System.out.println("I'm listening to " + this.getId());
-        if (isAlive) {
+    public void startListen() {
+        System.out.println("Listening on " + this.getId());
+        while (isAlive) {
+            initiateServerSocket();
+            try {
+                receiveMessage();
+            }catch (IOException e){
+                e.printStackTrace();
+            }
             if (isCoordinator) {
-                initiateServerSocket();
-                receiveAndGiveResponse(); ///listen for 2 second and send alive wait indefinitely
-                mangerInterface.sendMessageToAll(ALIVE_MESSAGE);
-            } else {
-                /// when timed out the socket is not closed so we don't need to open it again
-                initiateServerSocket();
-                receiveAndGiveResponse(); /// wait 3 seconds
+                mangerInterface.sendMessageToAll(this, ALIVE_MESSAGE);
             }
         }
-        System.out.println(this.getId() + " no coordinator");
-        if (isCoordinator)
+        if (!isCoordinator)
             mangerInterface.requestElection(this);
 
     }
 
     private void initiateServerSocket() {
-        if (this.getServerSocket() == null || this.getServerSocket().isClosed()) {
-            System.out.println("binding " + this.getId());
-            try {
-                setServerSocket(new ServerSocket(this.getId()));
-//                getServerSocket().setSoTimeout(MESSAGE_TIME_OUT);
-            } catch (IOException e) {
-                System.out.println("Couldn't establish connection on " + getId());
+        try {
+            if (this.serverSocket == null || this.serverSocket.isClosed()) {
+                serverSocket = new ServerSocket(this.getId());
             }
+        } catch (IOException e) {
+            System.out.println("Couldn't establish connection on " + getId());
         }
     }
 
@@ -175,7 +130,7 @@ public class Process {
     }
 
     public void setCoordinator(boolean coordinator) {
-        isCoordinator = coordinator;
+        this.isCoordinator = coordinator;
     }
 
     public ServerSocket getServerSocket() {
