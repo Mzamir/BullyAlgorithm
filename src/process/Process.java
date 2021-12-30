@@ -146,7 +146,7 @@ public class Process {
         }
         // if not alive and coordinator
         // send election request
-        if (coordinator)
+        if (!coordinator)
             mangerInterface.requestElection();
 
     }

@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="BullyAlgorithm:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/BullyAlgorithm_jar</output-path>
+    <root id="archive" name="BullyAlgorithm.jar">
+      <element id="module-output" name="BullyAlgorithm" />
+    </root>
+  </artifact>
+</component>

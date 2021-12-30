@@ -80,11 +80,18 @@ public class ProcessManger implements ProcessMangerInterface {
                 new Message(new Date().getTime(), myProcess.getId(), ALIVE_MESSAGE, message)));
     }
 
+    /*
+     * send election message to all processes
+     * set myProcess as a coordinator
+     * if one of the processes respond with VICTORY will reset coordinator flag
+     *
+     * */
     @Override
     public void requestElection() {
         System.out.println("Election requested");
         System.out.println("*************************");
-        System.out.println("*************************");
+        sendMessageToAll(new Message(new Date().getTime(), myProcess.getId(), ELECTION_MESSAGE, String.valueOf(myProcess.getId())));
+        myProcess.setCoordinator(true);
     }
 
     @Override
@@ -139,6 +146,7 @@ public class ProcessManger implements ProcessMangerInterface {
         int winnerProcessId = message.getProcessId();
         System.out.println(winnerProcessId + " Won the election ");
         this.processList.removeIf(process -> process.getId() == winnerProcessId);
+        myProcess.setId(winnerProcessId);
         myProcess.setCoordinator(true);
         myProcess.setAlive(true);
     }
