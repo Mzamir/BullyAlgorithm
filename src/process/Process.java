@@ -1,26 +1,33 @@
 package process;
 
+import static message.MessagesTypes.*;
+
 import message.Message;
-import message.MessageMapper;
+import utils.ObjectMapper;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.Date;
 
 import static utils.Constants.*;
 
 public class Process {
     private int id;
-    private boolean isAlive = true;
-    private boolean isCoordinator = false;
+    private boolean alive = true;
+    private boolean coordinator = false;
     private ServerSocket serverSocket = null;
-    private final ProcessMangerInterface mangerInterface;
+    private ProcessMangerInterface mangerInterface;
 
 
-    public Process(int id, boolean isAlive, boolean isCoordinator, ProcessMangerInterface mangerInterface) {
+    public Process(int id) {
         this.id = id;
-        this.isAlive = isAlive;
-        this.isCoordinator = isCoordinator;
+    }
+
+    public Process(int id, boolean alive, boolean coordinator, ProcessMangerInterface mangerInterface) {
+        this.id = id;
+        this.alive = alive;
+        this.coordinator = coordinator;
         this.mangerInterface = mangerInterface;
         try {
             this.serverSocket = new ServerSocket(id);
@@ -35,25 +42,28 @@ public class Process {
     }
 
     // act as a client to send message
-    public void sendMessage(Process process, Message message) {
+    public String sendMessage(Process process, Message message) {
         try {
             Socket socket = new Socket(HOST, process.getId());
             socket.setSoTimeout(MESSAGE_TIME_OUT);
-            System.out.println("Sending " + message + " from " + this.getId() + " to " + process.getId());
+            System.out.println("Sending " + ObjectMapper.mapMessageToString(message) + " from " + this.getId() + " to " + process.getId());
             DataInputStream inputStream = new DataInputStream(socket.getInputStream());
             DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
             // Send message to the process
-            outputStream.writeUTF(MessageMapper.parseToString(message));
+            outputStream.writeUTF(ObjectMapper.mapMessageToString(message));
             // Get response
             String response = inputStream.readUTF();
-            handleReceivedMessage(response);
+            handleResponseOnSendMessage(response);
 
+            // Close connection
             outputStream.flush();
             outputStream.close();
             socket.close();
+            return response;
         } catch (Exception e) {
             System.out.println("Exception " + e.getMessage() + " on " + process.getId());
         }
+        return null;
     }
 
     // Act as server to receive message
@@ -63,59 +73,96 @@ public class Process {
             Socket socket = serverSocket.accept();
             DataInputStream inputStream = new DataInputStream(socket.getInputStream());
             DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream());
+            // Received message
             String messageFromClient = inputStream.readUTF();
             System.out.println(this.getId() + " Received " + messageFromClient);
+            // respond to received message
             Message message = handleReceivedMessage(messageFromClient);
-            System.out.println(this.getId() + " Response is " + message);
-            outputStream.writeUTF(MessageMapper.parseToString(message));
+            if (message != null) {
+                String messageToClient = ObjectMapper.mapMessageToString(message);
+                System.out.println(this.getId() + " Response is " + messageToClient);
+                outputStream.writeUTF(messageToClient);
+            }
+            // Close connection
             outputStream.flush();
             outputStream.close();
             inputStream.close();
 
-            return MessageMapper.parseToObject(messageFromClient);
+            return ObjectMapper.mapMessageToObject(messageFromClient);
         } catch (IOException e) {
-            if (!this.isCoordinator) {
+            if (!this.coordinator) {
                 System.out.println(this.getId() + " no responding will be deactivated");
-                this.isAlive = false;
+                this.alive = false;
             }
         }
         return null;
     }
 
+    // Generate response based on received message
     private Message handleReceivedMessage(String messageFromClient) {
-        Message message = MessageMapper.parseToObject(messageFromClient);
-        if (message.getMessageTyp().equals(REGISTER_MESSAGE)) {
-            mangerInterface.addNewProcess();
-        } else if (message.getMessageTyp().equals(ELECTION_MESSAGE)) {
-            mangerInterface.requestElection();
+        Message message = ObjectMapper.mapMessageToObject(messageFromClient);
+        Message responseMessage;
+        System.out.println("Received " + message.getMessageTyp());
+        switch (message.getMessageTyp()) {
+            case REGISTER_MESSAGE:
+                mangerInterface.addNewProcess();
+                mangerInterface.notifyOthersWithNewProcess();
+                responseMessage = new Message(new Date().getTime(), this.getId(), LIST_MESSAGE, mangerInterface.getParsedProcessList());
+                break;
+            case ADD_MESSAGE:
+                mangerInterface.addNewProcess(Integer.parseInt(message.getContent()));
+                responseMessage = new Message(new Date().getTime(), this.getId(), OK_MESSAGE, OK_MESSAGE);
+                break;
+            case ELECTION_MESSAGE:
+                mangerInterface.performElection();
+                responseMessage = new Message(new Date().getTime(), this.getId(), OK_MESSAGE, OK_MESSAGE);
+                break;
+            case VICTORY_MESSAGE:
+                mangerInterface.handleVictoryMessage(message);
+                responseMessage = new Message(new Date().getTime(), this.getId(), OK_MESSAGE, OK_MESSAGE);
+                break;
+            default:
+                responseMessage = new Message(new Date().getTime(), this.getId(), OK_MESSAGE, OK_MESSAGE);
         }
-        return new Message(this.getId(), message.getMessageTyp(), messageFromClient);
+        return responseMessage;
+    }
+
+    private void handleResponseOnSendMessage(String messageFromClient) {
+        Message message = ObjectMapper.mapMessageToObject(messageFromClient);
+        System.out.println("Received " + message.getMessageTyp());
+        if (LIST_MESSAGE.equals(message.getMessageTyp())) {
+            mangerInterface.handleReceivedProcessList(message.getContent());
+        }
     }
 
     public void startListen() {
-        while (isAlive) {
+        while (alive) {
             initiateServerSocket();
-            receiveMessage();
-
-            if (isCoordinator)
-                mangerInterface.sendMessageToAll(this, ALIVE_MESSAGE);
+            if (!isServerDown()) {
+                receiveMessage();
+                if (coordinator)
+                    mangerInterface.sendMessageToAll(ALIVE_MESSAGE);
+            }
         }
-        // if not alive and not coordinator
+        // if not alive and coordinator
         // send election request
-        if (!isCoordinator)
-            mangerInterface.requestElection(this);
+        if (coordinator)
+            mangerInterface.requestElection();
 
     }
 
+    private boolean isServerDown() {
+        return this.serverSocket == null || this.serverSocket.isClosed();
+    }
+
     public void initiateServerSocket() {
-        try {
-            if (this.serverSocket == null || this.serverSocket.isClosed()) {
+        if (isServerDown())
+            try {
                 serverSocket = new ServerSocket(this.getId());
                 System.out.println("Listening on " + this.getId());
+            } catch (IOException e) {
+                System.out.println("Couldn't establish connection on " + getId());
             }
-        } catch (IOException e) {
-            System.out.println("Couldn't establish connection on " + getId());
-        }
     }
 
     public int getId() {
@@ -127,19 +174,20 @@ public class Process {
     }
 
     public boolean isAlive() {
-        return isAlive;
+        return alive;
     }
 
     public void setAlive(boolean alive) {
-        isAlive = alive;
+        this.alive = alive;
     }
 
     public boolean isCoordinator() {
-        return isCoordinator;
+        return coordinator;
     }
 
     public void setCoordinator(boolean coordinator) {
-        this.isCoordinator = coordinator;
+        this.coordinator = coordinator;
+//        System.out.println(this.getId() + " is now the coordinator");
     }
 
     public ServerSocket getServerSocket() {
@@ -152,10 +200,10 @@ public class Process {
 
     @Override
     public String toString() {
-        return "process.Process{" +
+        return "Process{" +
                 "id=" + id +
-                ", isAlive=" + isAlive +
-                ", isCoorinputator=" + isCoordinator +
+                ", isAlive=" + alive +
+                ", isCoordinator=" + coordinator +
                 '}';
     }
 }

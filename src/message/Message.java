@@ -1,27 +1,33 @@
 package message;
 
-import com.google.gson.Gson;
-
 public class Message {
-    private int id;
+    private long timeStamp;
+    private int processId;
     private String messageTyp;
     private String content;
 
     public Message() {
     }
 
-    public Message(int id, String messageTyp, String content) {
-        this.id = id;
+    public Message(long timeStamp, int processId, String messageTyp, String content) {
+        this.timeStamp = timeStamp;
+        this.processId = processId;
         this.messageTyp = messageTyp;
         this.content = content;
     }
 
-    public int getId() {
-        return id;
+    public Message(int processId, String messageTyp, String content) {
+        this.processId = processId;
+        this.messageTyp = messageTyp;
+        this.content = content;
     }
 
-    public void setId(int id) {
-        this.id = id;
+    public int getProcessId() {
+        return processId;
+    }
+
+    public void setProcessId(int processId) {
+        this.processId = processId;
     }
 
     public String getMessageTyp() {
@@ -40,5 +46,11 @@ public class Message {
         this.content = content;
     }
 
+    public long getTimeStamp() {
+        return timeStamp;
+    }
 
+    public void setTimeStamp(long timeStamp) {
+        this.timeStamp = timeStamp;
+    }
 }
